@@ -1,155 +1,145 @@
 ﻿using LightingDevice.models;
+using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Windows;
+using System.Windows.Controls;
+using LightingDevice.models;
 
 namespace LightingDevice
 {
-    /// <summary>
-    /// Interaction logic for MainWindow.xaml
-    /// </summary>
     public partial class MainWindow : Window
     {
-        private readonly List<IlluminationDevice> devices;
+        private object selectedInstance;
+        private MethodInfo selectedMethod;
 
         public MainWindow()
         {
             InitializeComponent();
+        }
 
-            devices = new List<IlluminationDevice>
-            {
-                new Streetlight(),
-                new DeskLamp(),
-                new Chandelier(),
-                new Torchere()
-            };
+        private void btnBrowse_Click(object sender, RoutedEventArgs e)
+        {
+            Microsoft.Win32.OpenFileDialog openFileDialog = new Microsoft.Win32.OpenFileDialog();
+            openFileDialog.Filter = "DLL files (*.dll)|*.dll|All files (*.*)|*.*";
 
-            foreach (var device in devices)
+            if (openFileDialog.ShowDialog() == true)
             {
-                device.Broken += (sender, args) =>
-                {
-                    MessageBox.Show($"The {sender.GetType().Name} is broken.");
-                };
-                deviceListBox.Items.Add(device.GetType().Name);
+                string path = openFileDialog.FileName;
+                LoadAssembly(path);
             }
         }
 
-        private void Button_Click(object sender, RoutedEventArgs e)
+        private void LoadAssembly(string path)
         {
-            var selectedIndex = deviceListBox.SelectedIndex;
-            if (selectedIndex != -1)
+            try
             {
-                var selectedDevice = devices[selectedIndex];
-                if (!selectedDevice.IsOn)
-                {
-                    selectedDevice.TurnOn();
-                }
-                else
-                {
-                    selectedDevice.TurnOff();
-                }
-                if (selectedDevice.IsOn)
-                {
-                    statusText.Text = $"{selectedDevice.GetType().Name} is now ON";
-                }
-                else
-                {
-                    statusText.Text = $"{selectedDevice.GetType().Name} is now OFF";
-                }
+                Assembly assembly = Assembly.LoadFrom(path);
+                List<Type> types = new List<Type>();
 
-            }
-            else
-            {
-                MessageBox.Show("Please select a device to test.");
-            }
-        }
-        private void ConnectDeskLampButton_Click(object sender, RoutedEventArgs e)
-        {
-            var selectedIndex = deviceListBox.SelectedIndex;
-            if (selectedIndex != -1)
-            {
-                if (devices[selectedIndex] is DeskLamp deskLamp)
+                foreach (Type type in assembly.GetTypes())
                 {
-                    deskLamp.ConnectToPower();
-                    statusText.Text = $"DeskLamp is connected to power.";
-                }
-                else
-                {
-                    MessageBox.Show("DeskLamp must be selected to connect it to power.");
-                }
-            }
-            else
-            {
-                MessageBox.Show("Please select a device to connect to power.");
-            }
-        }
-
-        private void ConnectTorchereButton_Click(object sender, RoutedEventArgs e)
-        {
-            var selectedIndex = deviceListBox.SelectedIndex;
-            if (selectedIndex != -1)
-            {
-                if (devices[selectedIndex] is Torchere torchere)
-                {
-                    torchere.ConnectToPower();
-                    statusText.Text = $"Torchere is connected to power.";
-                }
-                else
-                {
-                    MessageBox.Show("Torchere must be selected to connect it to power.");
-                }
-            }
-            else
-            {
-                MessageBox.Show("Please select a device to connect to power.");
-            }
-        }
-
-        private void TurnOnChandelierButton_Click(object sender, RoutedEventArgs e)
-        {
-            var selectedIndex = deviceListBox.SelectedIndex;
-            if (selectedIndex != -1)
-            {
-                if (devices[selectedIndex] is Chandelier chandelier)
-                {
-                    chandelier.TurnOn();
-                    statusText.Text = $"Chandelier is turned on. Current mode: {chandelier.CurrentMode}";
-                }
-                else
-                {
-                    MessageBox.Show("Chandelier must be selected to switch its mode.");
-                }
-            }
-            else
-            {
-                MessageBox.Show("Please select a device to switch its mode.");
-            }
-        }
-        private void TurnOffChandelierButton_Click(object sender, RoutedEventArgs e)
-        {
-            var selectedIndex = deviceListBox.SelectedIndex;
-            if (selectedIndex != -1)
-            {
-                if (devices[selectedIndex] is Chandelier chandelier)
-                {
-                    chandelier.TurnOff();
-                    if (!chandelier.IsOn)
+                    if (typeof(IlluminationDevice).IsAssignableFrom(type))
                     {
-                        statusText.Text = $"Chandelier is turned off.";
-                    } else
-                    {
-                        statusText.Text = $"Chandelier is turned on. Current mode: {chandelier.CurrentMode}";
+                        types.Add(type);
+                        lbClasses.Items.Add(type.FullName); 
                     }
                 }
-                else
-                {
-                    MessageBox.Show("Chandelier must be selected to turn it off.");
-                }
+
+                lbClasses.SelectionChanged += (sender, e) => LoadMethods(types[lbClasses.SelectedIndex]);
             }
-            else
+            catch (Exception ex)
             {
-                MessageBox.Show("Please select a device to turn off.");
+                MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
+
+        private void LoadMethods(Type type)
+        {
+            try
+            {
+                selectedInstance = Activator.CreateInstance(type);
+                lbMethods.Items.Clear();
+
+                foreach (MethodInfo method in type.GetMethods())
+                {
+                    lbMethods.Items.Add(method.Name); 
+                }
+
+                lbMethods.SelectionChanged += (sender, e) =>
+                {
+                    selectedMethod = type.GetMethod(lbMethods.SelectedItem.ToString());
+
+                    ParameterInfo[] parameters = selectedMethod.GetParameters();
+
+                    if (parameters.Length > 0)
+                    {
+                        object[] methodParams = GetMethodParameters(parameters);
+                        if (methodParams == null) return; 
+                        ExecuteMethod(methodParams);
+                    }
+                    else
+                    {
+                        ExecuteMethod(null);
+                    }
+                };
+            } catch(Exception ex)
+            {
+                MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+       
+
+        private object[] GetMethodParameters(ParameterInfo[] parameters)
+        {
+            try
+            {
+                List<object> methodParams = new List<object>();
+
+                foreach (var param in parameters)
+                {
+                    string inputValue = Microsoft.VisualBasic.Interaction.InputBox($"Введите значение параметра {param.Name}:", "Ввод параметра", "");
+
+                    if (string.IsNullOrWhiteSpace(inputValue))
+                    {
+                        MessageBox.Show("Ввод параметра отменен.", "Предупреждение", MessageBoxButton.OK, MessageBoxImage.Warning);
+                        return null;
+                    }
+
+                    object value = Convert.ChangeType(inputValue, param.ParameterType);
+                    methodParams.Add(value);
+                }
+                return methodParams.ToArray();
+
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            return null;
+        }
+
+        private void ExecuteMethod(object[] methodParams)
+        {
+            try
+            {
+                if (selectedMethod != null && selectedInstance != null)
+                {
+                    object result = selectedMethod.Invoke(selectedInstance, methodParams);
+
+                    MessageBox.Show($"Результат выполнения метода: {result}", "Информация", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                else
+                {
+                    MessageBox.Show("Выберите класс и метод для выполнения.", "Предупреждение", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка: {ex.Message}", "Ошибка", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+
 
     }
 }
